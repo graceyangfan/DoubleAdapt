@@ -1,0 +1,20 @@
+[project]
+name = "doubleadpt"
+version = "0.1.0"
+description = "Double Adaptation Framework for Time Series Prediction"
+authors = [{ name = "Author" }]
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "scikit-learn>=1.0.0",
+    "torch>=2.0.0",
+    "higher>=0.2.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = [] 
