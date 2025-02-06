@@ -17,4 +17,8 @@ build-backend = "hatchling.build"
 
 [tool.rye]
 managed = true
-dev-dependencies = [] 
+dev-dependencies = []
+
+# Add this section to specify package location
+[tool.hatch.build.targets.wheel]
+packages = ["doubleadpt"] 

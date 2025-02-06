@@ -7,8 +7,9 @@ import random
 import copy
 from collections import OrderedDict
 import higher
-from higher_optim import *
-from model import DoubleAdapt 
+from tqdm import tqdm
+from .higher_optim import *  
+from .model import DoubleAdapt  
 
 class DoubleAdaptFramework:
     """
@@ -72,6 +73,10 @@ class DoubleAdaptFramework:
         self.early_stopping_patience = early_stopping_patience
         self.device = self.meta_model.device
         
+        self.adapt_x = adapt_x
+        self.adapt_y = adapt_y
+        self.is_rnn = is_rnn
+        
         self.data_adapter_opt = torch.optim.Adam(
             self.meta_model.meta_parameters,
             lr=lr_da
@@ -80,8 +85,6 @@ class DoubleAdaptFramework:
             self.meta_model.model.parameters(),
             lr=lr_theta
         )
-        self.is_rnn = is_rnn
-
 
     def offline_training(
         self,
@@ -98,20 +101,23 @@ class DoubleAdaptFramework:
             max_epochs: Maximum training epochs
             patience: Early stopping patience (ζ)
         """
-        best_metric = float('inf')
+        best_metric = float('-inf')  # Changed to -inf since we want to maximize IC
         patience_counter = patience
         best_phi = None
         best_psi = None
         
+        # Initialize progress bar
+        pbar = tqdm(range(max_epochs), desc='Offline Training')
+        
         # Initialize parameters (Line 1)
-        phi = self.meta_model.model.state_dict()  # Initialize φ
-        psi = {  # Initialize ψ
+        phi = self.meta_model.model.state_dict()
+        psi = {
             'feature_adapter': self.meta_model.feature_adapter.state_dict(),
             'label_adapter': self.meta_model.label_adapter.state_dict()
         }
         
         # Offline training phase (Line 2-8)
-        for epoch in range(max_epochs):
+        for epoch in pbar:
             # Shuffle training tasks (Line 3)
             shuffled_train = self._shuffle_tasks(train_tasks)
             
@@ -121,6 +127,12 @@ class DoubleAdaptFramework:
                 phi=phi,
                 psi=psi,
                 meta_model=self.meta_model
+            )
+            
+            # Calculate training metric
+            train_metric = self._calculate_metric(
+                predictions=train_predictions,
+                query_y=[task['query_y'].to(self.device) for task in train_tasks]
             )
             
             # Save current parameters
@@ -141,20 +153,29 @@ class DoubleAdaptFramework:
             self.meta_model.label_adapter.load_state_dict(curr_psi['label_adapter'])
             
             # Calculate validation metric (Line 7)
-            metric = self._calculate_metric(
+            valid_metric = self._calculate_metric(
                 predictions=valid_predictions,
                 query_y=[task['query_y'].to(self.device) for task in valid_tasks]
             )
             
+            # Update progress bar with metrics
+            pbar.set_postfix({
+                'train_ic': f'{train_metric:.4f}',
+                'valid_ic': f'{valid_metric:.4f}',
+                'best_ic': f'{best_metric:.4f}',
+                'patience': patience_counter
+            })
+            
             # Early stopping check (Line 8)
-            if metric > best_metric:
-                best_metric = metric
+            if valid_metric > best_metric:
+                best_metric = valid_metric
                 best_phi = copy.deepcopy(curr_phi)
                 best_psi = copy.deepcopy(curr_psi)
                 patience_counter = patience
             else:
                 patience_counter -= 1
                 if patience_counter <= 0:
+                    print(f"\nEarly stopping triggered. Best validation IC: {best_metric:.4f}")
                     break
         
         # Load best parameters
@@ -177,8 +198,10 @@ class DoubleAdaptFramework:
         Returns:
             metric: Evaluation metric on test set
         """
+        print("\nStarting online training...")
+        
         # Line 9: Execute DoubleAdapt on validation and test sets
-        online_tasks = valid_tasks + test_tasks  # T_valid ∪ T_test
+        online_tasks = valid_tasks + test_tasks
         
         # Get current parameters as initial values
         phi = self.meta_model.model.state_dict()
@@ -187,21 +210,24 @@ class DoubleAdaptFramework:
             'label_adapter': self.meta_model.label_adapter.state_dict()
         }
         
-        # Execute DoubleAdapt
-        phi, psi, predictions = self.double_adapt(
-            tasks=online_tasks,
-            phi=phi,
-            psi=psi,
-            meta_model=self.meta_model
-        )
+        # Execute DoubleAdapt with progress bar
+        with tqdm(total=1, desc='Online Adaptation') as pbar:
+            phi, psi, predictions = self.double_adapt(
+                tasks=online_tasks,
+                phi=phi,
+                psi=psi,
+                meta_model=self.meta_model
+            )
+            pbar.update(1)
         
         # Line 10: Calculate metric on test set
-        metric = self._calculate_metric(
+        test_metric = self._calculate_metric(
             predictions=predictions[-len(test_tasks):],
             query_y=[task['query_y'].to(self.device) for task in test_tasks]
         )
         
-        return metric
+        print(f"Final test IC: {test_metric:.4f}")
+        return test_metric
 
     def double_adapt(
         self,
@@ -234,9 +260,7 @@ class DoubleAdaptFramework:
             
             support_x = task['support_x'].to(self.device)
             support_y = task['support_y'].to(self.device)
-            raw_y = support_y.clone()
-        
-            support_predictions = None
+            
             # Meta-learning with higher
             with higher.innerloop_ctx(
                 meta_model.model,
@@ -246,62 +270,64 @@ class DoubleAdaptFramework:
                 override={'lr': [self.lr_theta]}
             ) as (fmodel, diffopt):
                 with torch.backends.cudnn.flags(enabled=self.first_order or not self.is_rnn):
-                    support_predictions, adapted_support_x = meta_model(
+                    y_hat, adapted_support_x = meta_model(
                         support_x,
                         model=fmodel,
                         transform=self.adapt_x
                     )
-            # Apply label adaptation if enabled
-            if self.adapt_y:
-                support_predictions = meta_model.label_adapter(
-                    support_x,
-                    support_predictions,
-                    inverse=True
+                
+                # Apply label adaptation if enabled
+                if self.adapt_y:
+                    raw_y = support_y
+                    y = meta_model.label_adapter(
+                        support_x,
+                        raw_y,
+                        inverse=False 
+                    )
+                # Calculate support set loss (Eq. 15) on agent space 
+                train_loss = self.criterion(y_hat, y)
+                diffopt.step(train_loss)
+                
+                # Forward pass on query set
+                query_x = task['query_x'].to(self.device)
+                query_y = task['query_y'].to(self.device)
+                query_predictions, adapted_query_x = meta_model(
+                    query_x,
+                    model=fmodel,
+                    transform=self.adapt_x
                 )
-            
-            # Calculate support set loss (Eq. 15)
-            train_loss = self.criterion(support_predictions, support_y)
-            diffopt.step(train_loss)
-            
-            # Forward pass on query set
-            query_x = task['query_x'].to(self.device)
-            query_y = task['query_y'].to(self.device)
-            query_predictions, adapted_query_x = meta_model(
-                query_x,
-                model=fmodel,
-                transform=self.adapt_x
-            )
-            
-            if self.adapt_y:
-                query_predictions = meta_model.label_adapter(query_x, query_predictions, inverse=True)
-            
-            # Calculate query set loss and regularization
-            query_loss = self.criterion(query_predictions, query_y)
-            
-            # Calculate regularization loss if label adaptation is enabled
-            if self.adapt_y:
-                y = meta_model.label_adapter(support_x, raw_y, inverse=False)
-                loss_y = F.mse_loss(y, raw_y)
                 
-                if self.first_order:
-                    with torch.no_grad():
-                        pred2, _ = meta_model(adapted_query_x, model=None, transform=False)
-                        pred2 = meta_model.label_adapter(query_x, pred2, inverse=True).detach()
-                        loss_old = self.criterion(pred2.view_as(query_y), query_y)
-                        loss_y = (loss_old.item() - query_loss.item()) / self.sigma * loss_y + loss_y * self.reg
-                else:
-                    loss_y = loss_y * self.reg
+                if self.adapt_y:
+                    query_predictions = meta_model.label_adapter(query_x, query_predictions, inverse=True)
+                
+                # Calculate query set loss and regularization 
+                query_loss = self.criterion(query_predictions, query_y) # in real target space 
+                
+                # Calculate regularization loss if label adaptation is enabled
+                if self.adapt_y:
+                    # Use support_y directly instead of raw_y
+                    if not self.first_order:
+                        y = self.framework.label_adapter(support_x, raw_y, inverse=False)
+                    loss_y = F.mse_loss(y, raw_y)
                     
-                loss_y.backward()
+                    if self.first_order:
+                        with torch.no_grad():
+                            pred2, _ = meta_model(adapted_query_x, model=None, transform=False)
+                            pred2 = meta_model.label_adapter(query_x, pred2, inverse=True).detach()
+                            loss_old = self.criterion(pred2.view_as(query_y), query_y)
+                            loss_y = (loss_old.item() - query_loss.item()) / self.sigma * loss_y + loss_y * self.reg
+                    else:
+                        loss_y = loss_y * self.reg
                 
-            # Update adapters
-            query_loss.backward()
-            if self.adapt_x or self.adapt_y:
-                self.data_adapter_opt.step()
-            
-            # Collect predictions
-            all_predictions.append(query_predictions.cpu())
-
+                query_loss = query_loss + loss_y 
+                
+                # Update adapters
+                query_loss.backward()
+                if self.adapt_x or self.adapt_y:
+                    self.data_adapter_opt.step()
+                self.forecast_opt.step() 
+                # Collect predictions
+                all_predictions.append(query_predictions.detach().cpu())  # Keep as tensor
 
         # Save final parameters
         phi_prev = copy.deepcopy(meta_model.model.state_dict())
@@ -317,24 +343,26 @@ class DoubleAdaptFramework:
         """Shuffle task order randomly"""
         return random.sample(tasks, len(tasks))
 
-    def _calculate_metric(self, predictions: List[torch.Tensor], query_y: List[torch.Tensor]) -> float:
+    def _calculate_metric(self, predictions: List[Union[torch.Tensor, np.ndarray]], query_y: List[torch.Tensor]) -> float:
         """Calculate evaluation metric (e.g. IC) for predictions
         
         Args:
-            predictions: List of prediction tensors
+            predictions: List of prediction arrays (either torch tensors or numpy arrays)
             query_y: List of ground truth tensors
             
         Returns:
             float: Calculated metric value
         """
-        # Convert predictions to numpy arrays
-        pred_arrays = [p.numpy() for p in predictions]
+        # Convert predictions to numpy arrays if they're still tensors
+        pred_arrays = [p.numpy() if torch.is_tensor(p) else p for p in predictions]
         
         # Calculate IC (Information Coefficient)
         ic_values = []
         for pred, y in zip(pred_arrays, query_y):
+            # Convert y to numpy if it's a tensor
+            y_np = y.cpu().numpy() if torch.is_tensor(y) else y
             # Calculate correlation between predictions and ground truth
-            corr = np.corrcoef(pred.flatten(), y.flatten())[0,1]
+            corr = np.corrcoef(pred.flatten(), y_np.flatten())[0,1]
             ic_values.append(corr)
         
         # Return mean IC

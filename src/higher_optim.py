@@ -1,15 +1,14 @@
 from higher import optim, patch
 from higher.optim import _OverrideType, _GradCallbackType
 import typing as _typing
-
 import torch as _torch
-
 import sys
 
+# Remove _forward_pre_hooks from patch._internal_attrs if it exists
 if "_forward_pre_hooks" in patch._internal_attrs:
     patch._internal_attrs.remove("_forward_pre_hooks")
 
-
+# Define DifferentiableOptimizer class
 class DifferentiableOptimizer(optim.DifferentiableOptimizer):
     def step(
         self,
@@ -129,7 +128,12 @@ class DifferentiableOptimizer(optim.DifferentiableOptimizer):
 
         return new_params
 
-
+# Update the module's DifferentiableOptimizer implementation
 setattr(
-    sys.modules["higher.optim"].__dict__["DifferentiableOptimizer"], "step", DifferentiableOptimizer.step,
+    sys.modules["higher.optim"].__dict__["DifferentiableOptimizer"],
+    "step",
+    DifferentiableOptimizer.step,
 )
+
+# Make the class available when importing *
+__all__ = ['DifferentiableOptimizer']

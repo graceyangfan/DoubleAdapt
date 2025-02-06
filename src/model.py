@@ -222,13 +222,16 @@ class ForecastModel(nn.Module):
         device: torch.device = None
     ):
         super().__init__()
-        self.model = model
         self.device = device or torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.to(self.device)
+        self.model = model
+        # Move model to device
+        self.model.to(self.device)
 
     def forward(self, x: torch.Tensor, model: nn.Module = None) -> torch.Tensor:
         if not model:
             model = self.model
+        # Ensure input is on correct device
+        x = x.to(self.device)
         # Generate prediction
         predictions = model(x)
         return predictions.view(-1)
@@ -262,10 +265,14 @@ class DoubleAdapt(ForecastModel):
         )
         
         self.label_adapter = LabelAdapter(
-            feature_dim=feature_dim,
+            x_dim=feature_dim,
             num_head=num_head,
             temperature=temperature
         )
+        
+        # Move adapters to device
+        self.feature_adapter.to(self.device)
+        self.label_adapter.to(self.device)
         
         # Collect meta-parameters
         self.meta_parameters = list(self.feature_adapter.parameters()) + \
@@ -277,6 +284,9 @@ class DoubleAdapt(ForecastModel):
         model: nn.Module = None,
         transform: bool = True
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        # Ensure input is on correct device
+        x = x.to(self.device)
+        
         # Apply feature adaptation if requested
         if transform:
             x = self.feature_adapter(x)
