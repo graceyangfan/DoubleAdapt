@@ -49,68 +49,69 @@ pip install .
 ```
 doubleadpt/
 ├── src/
-│   ├── dataset.py      # Rolling task sampler for meta-learning
-│   ├── handler.py      # Data preprocessing and normalization
-│   ├── model.py        # Neural network architectures
-│   └── trainner.py     # Double adaptation implementation
-├── main.py             # Training script with configuration
-├── pyproject.toml      # Project dependencies
+│   ├── double_adapt/
+│   │   ├── dataset.py      # Rolling task sampler for meta-learning
+│   │   ├── handler.py      # Data preprocessing and normalization
+│   │   ├── model.py        # Neural network architectures
+│   │   └── trainner.py     # Double adaptation implementation
+│   ├── tlob/               # TLOB model implementation
+│   │   ├── tlob.py        # TLOB architecture
+│   │   └── mlplob.py      # MLP-based LOB model
+│   └── train_tool.py       # Main training script with CLI interface
+├── pyproject.toml          # Project dependencies
 └── README.md
 ```
 
-## Quick Start
+## Quick Start with Command Line Interface
 
-```python
-from doubleadpt.src.handler import RobustZScoreNorm
-from doubleadpt.src.trainner import DoubleAdaptFramework
-from doubleadpt.src.dataset import RollingTaskSampler
-
-# Initialize data preprocessing
-normalizer = RobustZScoreNorm()
-X_norm = normalizer.fit_transform(X)
-
-# Create task sampler
-sampler = RollingTaskSampler(
-    X_norm, 
-    support_size=60,  # Historical context window
-    query_size=20     # Prediction window
-)
-
-# Initialize and train framework
-framework = DoubleAdaptFramework(
-    model=your_model,
-    criterion=your_loss_function,
-    x_dim=feature_dim,
-    device=device
-)
-
-# Train offline (meta-learning phase)
-framework.offline_training(train_tasks, valid_tasks, max_epochs=100)
-
-# Adapt online (deployment phase)
-metrics = framework.online_training(valid_tasks, test_tasks)
-```
-
-## Command Line Usage
+The main training script (`src/train_tool.py`) provides a comprehensive CLI for training the DoubleAdapt framework with either TLOB (Transformer) or MLPLOB (MLP-based) models.
 
 ```bash
-python main.py --data_path /path/to/your/data.csv --output_dir outputs
+python src/train_tool.py \
+  --data_path /path/to/your/data.csv \
+  --model_type tlob \
+  --price_column mid_price \
+  --label_horizon 30 \
+  --sequence_length 30 \
+  --hidden_dim 64 \
+  --num_layers 2 \
+  --support_length 900 \  # 15 minutes (15 * 60)
+  --query_length 300      # 5 minutes (5 * 60)
 ```
 
 ### Key Arguments
 
-- `--data_path`: Path to input CSV data file (required)
-- `--output_dir`: Directory for saving outputs (default: 'outputs')
-- `--support_size`: Historical context window size (default: 60)
-- `--query_size`: Prediction window size (default: 20)
-- `--max_epochs`: Maximum training epochs (default: 100)
+- Data Configuration:
+  - `--data_path`: Path to input data file (CSV/Parquet)
+  - `--price_column`: Name of the price column (default: 'mid_price')
+  - `--label_horizon`: Prediction horizon for trend labels (default: 30)
+  - `--smooth_window`: Smoothing window for label calculation (default: 5)
+
+- Model Configuration:
+  - `--model_type`: Choose between 'tlob' or 'mlplob' (default: 'tlob')
+  - `--hidden_dim`: Hidden dimension size (default: 64)
+  - `--num_layers`: Number of model layers (default: 2)
+  - `--num_heads`: Number of attention heads for TLOB (default: 4)
+  - `--sequence_length`: Input sequence length (default: 30)
+
+- Training Configuration:
+  - `--support_length`: Historical context window (default: 900)
+  - `--query_length`: Prediction window (default: 300)
+  - `--interval`: Rolling interval for sampling (default: 5)
+  - `--max_epochs`: Maximum training epochs (default: 10)
+  - `--patience`: Early stopping patience (default: 5)
+  - `--lr_theta`: Learning rate for forecast model (default: 0.001)
+  - `--lr_da`: Learning rate for data adapter (default: 0.01)
 
 ## Input Data Format
 
-Required CSV structure:
-- `datetime`: Temporal index column
-- `label`: Target values column
-- Feature columns used for prediction
+Supported file formats:
+- CSV files (*.csv)
+- Parquet files (*.parquet)
+
+Required structure:
+- Temporal features (e.g., price data, technical indicators)
+- Target column for prediction
 
 ## Citation
 
@@ -127,4 +128,4 @@ If you use this implementation in your research, please cite:
 
 ## License
 
-MIT License 
+MIT License

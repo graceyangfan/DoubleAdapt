@@ -9,6 +9,8 @@ dependencies = [
     "scikit-learn>=1.0.0",
     "torch>=2.0.0",
     "higher>=0.2.1",
+    "seaborn>=0.11.0",
+    "einops>=0.3.0",
 ]
 
 [build-system]
