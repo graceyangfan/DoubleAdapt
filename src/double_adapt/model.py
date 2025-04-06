@@ -234,7 +234,7 @@ class ForecastModel(nn.Module):
         x = x.to(self.device)
         # Generate prediction
         predictions = model(x)
-        return predictions.view(-1)
+        return predictions
 
 class DoubleAdapt(ForecastModel):
     """

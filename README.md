@@ -1,121 +1,171 @@
 # DoubleAdapt
 
-A refined implementation of the double adaptation framework for time series prediction, based on the paper ["Double Adaptation for Time Series Forecasting"](https://arxiv.org/abs/2306.09862) (ICML 2023). This repository is a restructured version of the [original implementation](https://github.com/SJTU-DMTai/DoubleAdapt) with improved code organization and usability.
+A refined implementation of the double adaptation framework for time series prediction, based on the paper ["Double Adaptation for Time Series Forecasting"](https://arxiv.org/abs/2306.09862) (ICML 2023).
 
 ## Overview
 
-DoubleAdapt addresses the challenge of distribution shifts in time series forecasting through a novel double adaptation framework that combines:
+DoubleAdapt is a sophisticated framework for time series forecasting that addresses distribution shifts through:
 
-1. **Offline Meta-Learning**: Learns generalizable patterns across historical tasks
+1. **Offline Meta-Learning**: Pre-trains on historical tasks to learn transferable patterns
 2. **Online Adaptation**: Rapidly adapts to new data distributions using meta-learned initialization
 
-Key advantages:
-- Handles both gradual and abrupt distribution shifts
-- Requires minimal adaptation data
-- Maintains model stability while enabling quick adaptation
-- Achieves superior performance compared to traditional online learning methods
+## Core Features
 
-## Features
+### Advanced Data Processing
 
-- **Enhanced Implementation**:
-  - Clean, modular code structure
-  - Type hints and comprehensive documentation
-  - Improved data preprocessing with robust Z-score normalization
-  - Flexible task sampling for time series data
+#### Large-Scale Data Management
+- **Efficient File Formats**
+  - Native support for CSV and Parquet files
+  - Smart chunking for large datasets
+  - Progressive data loading with memory optimization
+
+- **Intelligent Data Streaming**
+  - LRU caching mechanism for frequent sequences
+  - Configurable cache sizes and sequence lengths
+  - Memory-efficient batch processing
+
+#### Smart Data Processing
+- **Trend Label Generation**
+  - High-pass filtering for price movements
+  - Automated trend detection and labeling
+  - Configurable prediction horizons
+
+- **Feature Engineering**
+  - Robust Z-score normalization
+  - Efficient feature scaling for large datasets
+  - Automatic feature selection
+
+### Model Architecture
+
+#### Multiple Model Support
+- **TLOB (Transformer-based)**
+  - Attention-based architecture for complex patterns
+  - Configurable number of heads and layers
+  - Optional sinusoidal embeddings
+
+- **MLPLOB (MLP-based)**
+  - Lightweight architecture for fast inference
+  - Adjustable hidden dimensions
+  - Efficient parameter management
+
+- **GRULOB (GRU-based)**
+  - Sequential pattern learning
+  - Configurable dropout and layer count
+  - Memory-efficient implementation
+
+### Training Framework
+
+#### Double Adaptation Process
+- **Offline Training Phase**
+  - Meta-learning across historical tasks
+  - Efficient parameter optimization
+  - Early stopping with validation monitoring
   
-- **Core Components**:
-  - Meta-learning based offline training
-  - Efficient online adaptation mechanism
-  - Support/query set based task creation
-  - Customizable model architectures
+- **Online Adaptation Phase**
+  - Rapid adaptation to new distributions
+  - Support/query set based adaptation
+  - Progressive parameter updates
 
-## Installation
+#### Performance Optimization
+- **Memory Management**
+  - Efficient gradient accumulation
+  - Smart tensor cleanup
+  - Automatic resource management
 
-### Using UV (Recommended)
+- **Training Efficiency**
+  - Parallel data loading
+  - Batch size optimization
+  - GPU memory optimization
 
-```bash
-uv venv
-uv pip install .
-```
+## Technical Details
 
-### Using pip
-
-```bash
-pip install .
-```
-
-## Project Structure
+### Core Components
 
 ```
-doubleadpt/
-├── src/
-│   ├── double_adapt/
-│   │   ├── dataset.py      # Rolling task sampler for meta-learning
-│   │   ├── handler.py      # Data preprocessing and normalization
-│   │   ├── model.py        # Neural network architectures
-│   │   └── trainner.py     # Double adaptation implementation
-│   ├── tlob/               # TLOB model implementation
-│   │   ├── tlob.py        # TLOB architecture
-│   │   └── mlplob.py      # MLP-based LOB model
-│   └── train_tool.py       # Main training script with CLI interface
-├── pyproject.toml          # Project dependencies
-└── README.md
+src/
+├── double_adapt/
+│   ├── dataset.py        # Efficient data loading and processing
+│   ├── handler.py        # Data preprocessing and normalization
+│   ├── loss_accumulator.py # Memory-efficient loss computation
+│   ├── model.py          # Neural network architectures
+│   └── trainer.py        # Double adaptation implementation
+├── models/
+│   ├── tlob.py          # Transformer-based model
+│   ├── mlplob.py        # MLP-based model
+│   └── gru.py           # GRU-based model
+└── train_tool.py         # Main training script
 ```
 
-## Quick Start with Command Line Interface
+### Key Parameters
 
-The main training script (`src/train_tool.py`) provides a comprehensive CLI for training the DoubleAdapt framework with either TLOB (Transformer) or MLPLOB (MLP-based) models.
+#### Data Processing
+- `chunk_size`: Size of data chunks for processing (default: 3600*4)
+- `sequence_length`: Length of input sequences (default: 10)
+- `support_length`: Support set window size (default: 3600*2)
+- `query_length`: Query set window size (default: 3600)
+- `cache_size`: LRU cache size for sequences (default: 10)
+- `stride`: Stride for sequence creation (default: 1)
+
+#### Training Configuration
+- `lr_theta`: Learning rate for forecast model (default: 0.0005)
+- `lr_da`: Learning rate for data adapters (default: 0.005)
+- `first_order`: Enable first-order approximation
+- `adapt_x`: Enable feature adaptation
+- `adapt_y`: Enable label adaptation
+- `sigma`: Label adapter regularization parameter (default: 1.0)
+- `reg`: Regularization coefficient (default: 0.5)
+
+### Memory Optimization
+
+- **TimeSeriesDataset**
+  - Progressive sequence loading
+  - LRU caching mechanism
+  - Efficient row group reading
+  - Smart batch processing
+
+- **LossAccumulator**
+  - Batch-wise loss computation
+  - Memory-efficient gradient accumulation
+  - Automatic tensor cleanup
+  - Device-aware computation
+
+- **DoubleAdaptFramework**
+  - Efficient parameter management
+  - Progressive loading of support/query sets
+  - Smart resource cleanup
+  - Optimized parameter updates
+
+## Quick Start
 
 ```bash
 python src/train_tool.py \
-  --data_path /path/to/your/data.csv \
+  --data_path /path/to/data.csv \
   --model_type tlob \
-  --price_column mid_price \
-  --label_horizon 30 \
   --sequence_length 30 \
-  --hidden_dim 64 \
-  --num_layers 2 \
-  --support_length 900 \  # 15 minutes (15 * 60)
-  --query_length 300      # 5 minutes (5 * 60)
+  --support_length 900 \
+  --query_length 300 \
+  --chunk_size 3600 \
+  --cache_size 128
 ```
 
-### Key Arguments
+## Performance Considerations
 
-- Data Configuration:
-  - `--data_path`: Path to input data file (CSV/Parquet)
-  - `--price_column`: Name of the price column (default: 'mid_price')
-  - `--label_horizon`: Prediction horizon for trend labels (default: 30)
-  - `--smooth_window`: Smoothing window for label calculation (default: 5)
+1. **Memory Usage**
+   - Configure `cache_size` based on available RAM
+   - Adjust `chunk_size` for optimal I/O
+   - Set appropriate `batch_size` for GPU memory
 
-- Model Configuration:
-  - `--model_type`: Choose between 'tlob' or 'mlplob' (default: 'tlob')
-  - `--hidden_dim`: Hidden dimension size (default: 64)
-  - `--num_layers`: Number of model layers (default: 2)
-  - `--num_heads`: Number of attention heads for TLOB (default: 4)
-  - `--sequence_length`: Input sequence length (default: 30)
+2. **Processing Speed**
+   - Enable parallel processing with `num_workers`
+   - Optimize sequence stride for data loading
+   - Configure Parquet row group sizes
 
-- Training Configuration:
-  - `--support_length`: Historical context window (default: 900)
-  - `--query_length`: Prediction window (default: 300)
-  - `--interval`: Rolling interval for sampling (default: 5)
-  - `--max_epochs`: Maximum training epochs (default: 10)
-  - `--patience`: Early stopping patience (default: 5)
-  - `--lr_theta`: Learning rate for forecast model (default: 0.001)
-  - `--lr_da`: Learning rate for data adapter (default: 0.01)
-
-## Input Data Format
-
-Supported file formats:
-- CSV files (*.csv)
-- Parquet files (*.parquet)
-
-Required structure:
-- Temporal features (e.g., price data, technical indicators)
-- Target column for prediction
+3. **Training Efficiency**
+   - Use first-order approximation for large datasets
+   - Enable early stopping for convergence
+   - Optimize device placement
 
 ## Citation
-
-If you use this implementation in your research, please cite:
 
 ```bibtex
 @inproceedings{zhang2023double,
@@ -125,7 +175,3 @@ If you use this implementation in your research, please cite:
   year={2023}
 }
 ```
-
-## License
-
-MIT License

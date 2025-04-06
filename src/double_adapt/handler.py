@@ -1,5 +1,5 @@
-
-import numpy as np 
+import numpy as np
+import pickle
 
 class RobustZScoreNorm:
     """
@@ -58,14 +58,13 @@ class RobustZScoreNorm:
             'mad': self.mad_,
             'fitted': self.fitted
         }
-        np.save(path, params)
+        with open(path, 'wb') as f:
+            pickle.dump(params, f)
         
     def load(self, path):
         """Load scaler parameters"""
-        params = np.load(path, allow_pickle=True).item()
+        with open(path, 'rb') as f:
+            params = pickle.load(f)
         self.median_ = params['median']
         self.mad_ = params['mad']
         self.fitted = params['fitted']
-
-
-
